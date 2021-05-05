@@ -5,7 +5,7 @@
 ## <span id="jump_1">以Java线程栈局部变量为根扫描&复制活跃对象</span>
 一个YGC工作线程的调用链为：
 G1ParTask::work() --> G1RootProcessor::evacuate_roots() --> G1RootProcessor::process_java_roots() --> Threads::possibly_parallel_oops_do() --> 
-JavaThread::oops_do() --> 
+JavaThread::oops_do() --> frame::oops_do() --> frame::oops_do_internal() --> frame::oops_interpreted_do() --> InterpreterOopMap::iterate_oop() --> 
 
 G1ParTask::work()：一次YGC启动时，多个YGC工作线程的入口函数
 ```c++
@@ -127,6 +127,119 @@ void JavaThread::oops_do(OopClosure* f, CLDClosure* cld_f, CodeBlobClosure* cf) 
   // ...
 }
 ```
+
+frame::oops_do()
+```c++
+void oops_do(OopClosure* f, CLDClosure* cld_f, CodeBlobClosure* cf, RegisterMap* map) { oops_do_internal(f, cld_f, cf, map, true); }
+```
+
+frame::oops_do_internal()
+```c++
+void frame::oops_do_internal(OopClosure* f, CLDClosure* cld_f, CodeBlobClosure* cf, RegisterMap* map, bool use_interpreter_oop_map_cache) {
+  // ...
+  if (is_interpreted_frame()) {
+    oops_interpreted_do(f, cld_f, map, use_interpreter_oop_map_cache);
+  } else if (is_entry_frame()) {
+    oops_entry_do(f, map);
+  } else if (CodeCache::contains(pc())) {
+    oops_code_blob_do(f, cf, map);
+#ifdef SHARK
+  } else if (is_fake_stub_frame()) {
+    // nothing to do
+#endif // SHARK
+  } else {
+    ShouldNotReachHere();
+  }
+}
+```
+
+frame::oops_interpreted_do()
+```c++
+void frame::oops_interpreted_do(OopClosure* f, CLDClosure* cld_f,
+    const RegisterMap* map, bool query_oop_map_cache) {
+  // ...
+
+  InterpreterFrameClosure blk(this, max_locals, m->max_stack(), f);
+
+  // process locals & expression stack
+  InterpreterOopMap mask;
+  if (query_oop_map_cache) {
+    m->mask_for(bci, &mask);
+  } else {
+    OopMapCache::compute_one_oop_map(m, bci, &mask);
+  }
+  mask.iterate_oop(&blk);
+}
+```
+
+InterpreterOopMap::iterate_oop()
+```c++
+void InterpreterOopMap::iterate_oop(OffsetClosure* oop_closure) const {
+  int n = number_of_entries();
+  int word_index = 0;
+  uintptr_t value = 0;
+  uintptr_t mask = 0;
+  // iterate over entries
+  for (int i = 0; i < n; i++, mask <<= bits_per_entry) {
+    // get current word
+    if (mask == 0) {
+      value = bit_mask()[word_index++];
+      mask = 1;
+    }
+    // test for oop
+    if ((value & (mask << oop_bit_number)) != 0) oop_closure->offset_do(i);
+  }
+}
+```
+
+InterpreterFrameClosure::offset_do()
+```c++
+class InterpreterFrameClosure : public OffsetClosure {
+ private:
+  frame* _fr;
+  OopClosure* _f;
+  int    _max_locals;
+  int    _max_stack;
+
+ public:
+  InterpreterFrameClosure(frame* fr, int max_locals, int max_stack,
+                          OopClosure* f) {
+    _fr         = fr;
+    _max_locals = max_locals;
+    _max_stack  = max_stack;
+    _f          = f;
+  }
+
+  void offset_do(int offset) {
+    oop* addr;
+    if (offset < _max_locals) {
+      addr = (oop*) _fr->interpreter_frame_local_at(offset);
+      assert((intptr_t*)addr >= _fr->sp(), "must be inside the frame");
+      _f->do_oop(addr);
+    } else {
+      addr = (oop*) _fr->interpreter_frame_expression_stack_at((offset - _max_locals));
+      // In case of exceptions, the expression stack is invalid and the esp will be reset to express
+      // this condition. Therefore, we call f only if addr is 'inside' the stack (i.e., addr >= esp for Intel).
+      bool in_stack;
+      if (frame::interpreter_frame_expression_stack_direction() > 0) {
+        in_stack = (intptr_t*)addr <= _fr->interpreter_frame_tos_address();
+      } else {
+        in_stack = (intptr_t*)addr >= _fr->interpreter_frame_tos_address();
+      }
+      if (in_stack) {
+        _f->do_oop(addr);
+      }
+    }
+  }
+
+  int max_locals()  { return _max_locals; }
+  frame* fr()       { return _fr; }
+};
+```
+
+
+
+一个YGC工作线程的栈内存结构：
 
 
 
