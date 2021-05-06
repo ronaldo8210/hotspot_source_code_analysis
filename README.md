@@ -2,7 +2,8 @@
 * 基础数据结构
   * Java对象内存布局 
   * Region
-  * Card Table
+  * BarrierSet
+  * [Card Table](docs/card_table.md)
   * [Remembered Set](docs/rset.md)
   * Dirty Card Queue Set
   * SATB
