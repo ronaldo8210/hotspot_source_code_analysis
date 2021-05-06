@@ -5,7 +5,7 @@
 ## <span id="jump_1">以Java线程栈局部变量为根扫描&复制活跃对象</span>
 一个YGC工作线程的调用链为：
 G1ParTask::work() --> G1RootProcessor::evacuate_roots() --> G1RootProcessor::process_java_roots() --> Threads::possibly_parallel_oops_do() --> 
-JavaThread::oops_do() --> frame::oops_do() --> frame::oops_do_internal() --> frame::oops_interpreted_do() --> InterpreterOopMap::iterate_oop() --> 
+JavaThread::oops_do() --> frame::oops_do() --> frame::oops_do_internal() --> frame::oops_interpreted_do() --> InterpreterOopMap::iterate_oop() --> G1ParCopyClosure::do_oop_work()
 
 G1ParTask::work()：一次YGC启动时，多个YGC工作线程的入口函数
 ```c++
@@ -237,7 +237,57 @@ class InterpreterFrameClosure : public OffsetClosure {
 };
 ```
 
+G1ParCopyClosure::do_oop_work()（在g1CollectedHeap.cpp中定义）
+```c++
+template <G1Barrier barrier, G1Mark do_mark_object>
+template <class T>
+void G1ParCopyClosure<barrier, do_mark_object>::do_oop_work(T* p) {
+  T heap_oop = oopDesc::load_heap_oop(p);
 
+  if (oopDesc::is_null(heap_oop)) {
+    return;
+  }
+
+  oop obj = oopDesc::decode_heap_oop_not_null(heap_oop);
+
+  assert(_worker_id == _par_scan_state->queue_num(), "sanity");
+
+  const InCSetState state = _g1->in_cset_state(obj);
+  if (state.is_in_cset()) {
+    oop forwardee;
+    markOop m = obj->mark();
+    if (m->is_marked()) {
+      forwardee = (oop) m->decode_pointer();
+    } else {
+      forwardee = _par_scan_state->copy_to_survivor_space(state, obj, m);
+    }
+    assert(forwardee != NULL, "forwardee should not be NULL");
+    oopDesc::encode_store_heap_oop(p, forwardee);
+    if (do_mark_object != G1MarkNone && forwardee != obj) {
+      // If the object is self-forwarded we don't need to explicitly
+      // mark it, the evacuation failure protocol will do so.
+      mark_forwarded_object(obj, forwardee);
+    }
+
+    if (barrier == G1BarrierKlass) {
+      do_klass_barrier(p, forwardee);
+    }
+  } else {
+    if (state.is_humongous()) {
+      _g1->set_humongous_is_live(obj);
+    }
+    // The object is not in collection set. If we're a root scanning
+    // closure during an initial mark pause then attempt to mark the object.
+    if (do_mark_object == G1MarkFromRoot) {
+      mark_object(obj);
+    }
+  }
+
+  if (barrier == G1BarrierEvac) {
+    _par_scan_state->update_rs(_from, p, _worker_id);
+  }
+}
+```
 
 一个YGC工作线程的栈内存结构：
 
