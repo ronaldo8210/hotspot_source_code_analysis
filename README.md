@@ -2,7 +2,7 @@
 * 基础数据结构
   * Java对象内存布局 
   * Region
-  * BarrierSet
+  * [BarrierSet](docs/barrier_set.md)
   * [Card Table](docs/card_table.md)
   * [Remembered Set](docs/rset.md)
   * Dirty Card Queue Set
