@@ -1,6 +1,7 @@
 # 目录
 * 基础数据结构
   * Java对象内存布局 
+  * G1 Collected Heap
   * Heap Region
   * [Card Table](docs/card_table.md)
   * [Remembered Set](docs/rset.md)
@@ -8,7 +9,8 @@
   * Dirty Card Queue Set
   * InterpreterOopMap
   * SATB
-  * 各类可被回调对象Closure
+  * [各类可被回调对象Closure](docs/closure.md)
+  * G1 Par Task
 * Java对象分配过程
 * [Young GC](docs/ygc_principle.md)
   * [YGC源码实现解析](docs/ygc_code_analysis.md)
