@@ -4,8 +4,12 @@
 
 ## <span id="jump_1">以Java线程栈局部变量为根扫描&复制活跃对象</span>
 一个YGC工作线程的调用链为：
-G1ParTask::work() --> G1RootProcessor::evacuate_roots() --> G1RootProcessor::process_java_roots() --> Threads::possibly_parallel_oops_do() --> 
+
+1. 搜索Java线程栈中引用类型变量直接指向的年轻代的对象：
+   - G1ParTask::work() --> G1RootProcessor::evacuate_roots() --> G1RootProcessor::process_java_roots() --> Threads::possibly_parallel_oops_do() --> 
 JavaThread::oops_do() --> frame::oops_do() --> frame::oops_do_internal() --> frame::oops_interpreted_do() --> InterpreterOopMap::iterate_oop() --> G1ParCopyClosure::do_oop_work()
+
+2. 
 
 G1ParTask::work()：一次YGC启动时，多个YGC工作线程的入口函数
 ```c++
@@ -254,14 +258,20 @@ void G1ParCopyClosure<barrier, do_mark_object>::do_oop_work(T* p) {
 
   const InCSetState state = _g1->in_cset_state(obj);
   if (state.is_in_cset()) {
+    // 一个Java线程栈帧中的引用变量指向的年轻代中的对象可能同时也被另一个Java线程栈帧中的引用变量指向，
+    // 先根据对象头的当前信息判断对象是否已被复制过，若已复制过，直接从对象头中取得复制后的对象的地址。
+    // 这里处理的对象都是根对象，不会处理根对象的子对象。
     oop forwardee;
     markOop m = obj->mark();
     if (m->is_marked()) {
+      // 对象已复制过，从对象头中取得复制后的对象的地址。
       forwardee = (oop) m->decode_pointer();
     } else {
+      // 执行对象复制过程，返回复制后的对象的地址。
       forwardee = _par_scan_state->copy_to_survivor_space(state, obj, m);
     }
     assert(forwardee != NULL, "forwardee should not be NULL");
+    // 令Java线程栈帧中的引用变量指向复制后的对象的地址。
     oopDesc::encode_store_heap_oop(p, forwardee);
     if (do_mark_object != G1MarkNone && forwardee != obj) {
       // If the object is self-forwarded we don't need to explicitly
@@ -278,6 +288,8 @@ void G1ParCopyClosure<barrier, do_mark_object>::do_oop_work(T* p) {
     }
     // The object is not in collection set. If we're a root scanning
     // closure during an initial mark pause then attempt to mark the object.
+    // 如果在YGC阶段发现Java线程栈中的引用变量指向的是老年代中的对象，则对该老年代的对象进行标记处理，
+    // 如果后续有混合回收阶段，该标记会在并发标记阶段体现作用。
     if (do_mark_object == G1MarkFromRoot) {
       mark_object(obj);
     }
