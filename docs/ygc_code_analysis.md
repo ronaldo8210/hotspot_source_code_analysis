@@ -5,9 +5,9 @@
 ## <span id="jump_1">以Java线程栈局部变量为根扫描&复制活跃对象</span>
 一个YGC工作线程的调用链为：
 
-1. 搜索Java线程栈中引用类型变量直接指向的年轻代的对象：
+1. 搜索Java线程栈中引用类型变量直接指向的年轻代的对象，并将直接指向的对象复制到S区：
    - G1ParTask::work() --> G1RootProcessor::evacuate_roots() --> G1RootProcessor::process_java_roots() --> Threads::possibly_parallel_oops_do() --> 
-JavaThread::oops_do() --> frame::oops_do() --> frame::oops_do_internal() --> frame::oops_interpreted_do() --> InterpreterOopMap::iterate_oop() --> G1ParCopyClosure::do_oop_work()
+JavaThread::oops_do() --> frame::oops_do() --> frame::oops_do_internal() --> frame::oops_interpreted_do() --> InterpreterOopMap::iterate_oop() --> G1ParCopyClosure::do_oop_work() --> G1ParScanThreadState::copy_to_survivor_space()
 
 2. 
 
@@ -300,6 +300,113 @@ void G1ParCopyClosure<barrier, do_mark_object>::do_oop_work(T* p) {
   }
 }
 ```
+
+G1ParScanThreadState::copy_to_survivor_space()
+```c++
+oop G1ParScanThreadState::copy_to_survivor_space(InCSetState const state,
+                                                 oop const old,
+                                                 markOop const old_mark) {
+  const size_t word_sz = old->size();
+  HeapRegion* const from_region = _g1h->heap_region_containing_raw(old);
+  // +1 to make the -1 indexes valid...
+  const int young_index = from_region->young_index_in_cset()+1;
+  assert( (from_region->is_young() && young_index >  0) ||
+         (!from_region->is_young() && young_index == 0), "invariant" );
+  const AllocationContext_t context = from_region->allocation_context();
+
+  uint age = 0;
+  InCSetState dest_state = next_state(state, old_mark, age);
+  HeapWord* obj_ptr = _g1_par_allocator->plab_allocate(dest_state, word_sz, context);
+
+  // PLAB allocations should succeed most of the time, so we'll
+  // normally check against NULL once and that's it.
+  if (obj_ptr == NULL) {
+    obj_ptr = _g1_par_allocator->allocate_direct_or_new_plab(dest_state, word_sz, context);
+    if (obj_ptr == NULL) {
+      obj_ptr = allocate_in_next_plab(state, &dest_state, word_sz, context);
+      if (obj_ptr == NULL) {
+        // This will either forward-to-self, or detect that someone else has
+        // installed a forwarding pointer.
+        return _g1h->handle_evacuation_failure_par(this, old);
+      }
+    }
+  }
+
+  assert(obj_ptr != NULL, "when we get here, allocation should have succeeded");
+#ifndef PRODUCT
+  // Should this evacuation fail?
+  if (_g1h->evacuation_should_fail()) {
+    // Doing this after all the allocation attempts also tests the
+    // undo_allocation() method too.
+    _g1_par_allocator->undo_allocation(dest_state, obj_ptr, word_sz, context);
+    return _g1h->handle_evacuation_failure_par(this, old);
+  }
+#endif // !PRODUCT
+
+  // We're going to allocate linearly, so might as well prefetch ahead.
+  Prefetch::write(obj_ptr, PrefetchCopyIntervalInBytes);
+
+  const oop obj = oop(obj_ptr);
+  const oop forward_ptr = old->forward_to_atomic(obj);
+  if (forward_ptr == NULL) {
+    Copy::aligned_disjoint_words((HeapWord*) old, obj_ptr, word_sz);
+
+    if (dest_state.is_young()) {
+      if (age < markOopDesc::max_age) {
+        age++;
+      }
+      if (old_mark->has_displaced_mark_helper()) {
+        // In this case, we have to install the mark word first,
+        // otherwise obj looks to be forwarded (the old mark word,
+        // which contains the forward pointer, was copied)
+        obj->set_mark(old_mark);
+        markOop new_mark = old_mark->displaced_mark_helper()->set_age(age);
+        old_mark->set_displaced_mark_helper(new_mark);
+      } else {
+        obj->set_mark(old_mark->set_age(age));
+      }
+      age_table()->add(age, word_sz);
+    } else {
+      obj->set_mark(old_mark);
+    }
+
+    if (G1StringDedup::is_enabled()) {
+      const bool is_from_young = state.is_young();
+      const bool is_to_young = dest_state.is_young();
+      assert(is_from_young == _g1h->heap_region_containing_raw(old)->is_young(),
+             "sanity");
+      assert(is_to_young == _g1h->heap_region_containing_raw(obj)->is_young(),
+             "sanity");
+      G1StringDedup::enqueue_from_evacuation(is_from_young,
+                                             is_to_young,
+                                             queue_num(),
+                                             obj);
+    }
+
+    size_t* const surv_young_words = surviving_young_words();
+    surv_young_words[young_index] += word_sz;
+
+    if (obj->is_objArray() && arrayOop(obj)->length() >= ParGCArrayScanChunk) {
+      // We keep track of the next start index in the length field of
+      // the to-space object. The actual length can be found in the
+      // length field of the from-space object.
+      arrayOop(obj)->set_length(0);
+      oop* old_p = set_partial_array_mask(old);
+      push_on_queue(old_p);
+    } else {
+      HeapRegion* const to_region = _g1h->heap_region_containing_raw(obj_ptr);
+      _scanner.set_region(to_region);
+      // 遍历刚刚被复制的对象的每个引用属性
+      obj->oop_iterate_backwards(&_scanner);
+    }
+    return obj;
+  } else {
+    _g1_par_allocator->undo_allocation(dest_state, obj_ptr, word_sz, context);
+    return forward_ptr;
+  }
+}
+```
+
 
 一个YGC工作线程的栈内存结构：
 
