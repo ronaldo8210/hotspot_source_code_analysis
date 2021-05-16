@@ -1,12 +1,15 @@
 # 目录
 * 基础数据结构
   * Java对象内存布局 
-  * Region
+  * Heap Region
   * [Card Table](docs/card_table.md)
   * [Remembered Set](docs/rset.md)
   * [Barrier Set](docs/barrier_set.md)  
   * Dirty Card Queue Set
+  * InterpreterOopMap
   * SATB
+  * 各类可被回调对象Closure
+* Java对象分配过程
 * [Young GC](docs/ygc_principle.md)
   * [YGC源码实现解析](docs/ygc_code_analysis.md)
   * [一次YGC的内存变迁过程&各路线程执行过程](docs/ygc_memory_thread.md)
