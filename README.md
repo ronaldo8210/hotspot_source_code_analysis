@@ -12,6 +12,7 @@
   * [各类可被回调对象Closure](docs/closure.md)
   * G1 Par Task
 * Java对象分配过程
+  * [在Java线程私有空间分配](docs/thread_local_mem_alloc.md) 
 * [Young GC](docs/ygc_principle.md)
   * [YGC源码实现解析](docs/ygc_code_analysis.md)
     * 1 扫描并复制Java根对象直接引用的年轻代对象
