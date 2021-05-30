@@ -6,7 +6,7 @@
   * [Card Table](docs/card_table.md)
   * [Remembered Set](docs/rset.md)
   * [Barrier Set](docs/barrier_set.md)  
-  * Dirty Card Queue Set
+  * [Dirty Card Queue Set](docs/dcqs.md)
   * InterpreterOopMap
   * SATB
   * [各类可被回调对象Closure](docs/closure.md)
