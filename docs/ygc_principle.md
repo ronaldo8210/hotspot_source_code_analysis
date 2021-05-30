@@ -1,3 +1,13 @@
+[YGC原理](#jump_1)
+
+[一次YGC过程的示例](#jump_2)
+
+## <span id="jump_1">YGC原理</span>
+
+
+## <span id="jump_2">一次YGC过程的示例</span>
+
+
 以java线程栈的局部变量和老年代的对象为根进行标记
 
 
