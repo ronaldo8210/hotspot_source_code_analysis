@@ -15,7 +15,9 @@ Region与卡表的关系如下图所示：
 
   <img src="../images/card_table.png" width="100%" height="100%"/>
   
+下例中，设老年代对象O_obj_1引用年轻代对象Y_obj_1，老年代对象O_obj_2、O_obj_3引用年轻代对象Y_obj_2，则年轻代Region Y_Region_1和Y_Region_2的RSet结构如下图所示：
 
+  <img src="../images/rset_1.png" width="70%" height="70%"/>
 
 ## <span id="jump_2">RSet相关源码解析</span>
 
