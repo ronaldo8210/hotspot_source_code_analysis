@@ -23,7 +23,7 @@
     * 2 扫描并复制老年代对象直接引用的年轻代对象
     * 3 深度遍历并复制1&2过程已处理的年轻代对象的所有子对象
   * [一次YGC的内存变迁过程&各路线程执行过程](docs/ygc_memory_thread.md)
-* [混合回收](docs/mixed_gc_principle.md)
+* [Mixed GC](docs/mixed_gc_principle.md)
   * 初始化标记
     * [初始化标记源码实现解析](docs/mixed_gc_initial_mark_code_analysis.md)
     * [一次初始化标记的内存变迁过程&各路线程执行过程](docs/mixed_gc_initial_mark_memory_thread.md)
