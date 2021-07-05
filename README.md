@@ -18,14 +18,14 @@
   * [RSet原理与实例](docs/rset.md)
   * [Refine线程异步更新RSet](docs/refine_thread.md)
 * Young GC
-  * [YGC并行算法原理]（docs/ygc_principle.md）
+  * [YGC并行算法原理](docs/ygc_principle.md)
   * [YGC过程源码解析](docs/ygc_code_analysis.md)
     * 1 扫描并复制Java根对象直接引用的年轻代对象
     * 2 扫描并复制老年代对象直接引用的年轻代对象
     * 3 深度遍历并复制1&2过程已处理的年轻代对象的所有子对象
   * [YGC多程执行流程与内存架构变迁](docs/ygc_memory_thread.md)
 * Mixed GC
-  * [Mixed GC并行算法原理]（docs/mixed_gc_principle.md）
+  * [Mixed GC并行算法原理](docs/mixed_gc_principle.md)
   * 初始标记
     * [初始标记过程源码解析](docs/mixed_gc_initial_mark_code_analysis.md)
     * [初始标记多线程执行流程与内存架构变迁](docs/mixed_gc_initial_mark_memory_thread.md)
