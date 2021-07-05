@@ -15,8 +15,11 @@
   * [在Java线程私有空间分配（快速分配）](docs/thread_local_mem_alloc.md) 
   * 直接在堆上分配（慢速分配）
 * Remembered Set
-  * [RSet原理与实例](docs/rset.md)
-  * [Refine线程异步更新RSet](docs/refine_thread.md)
+  * [RSet在GC过程中的作用](docs/rset_purpose.md)
+  * [RSet内存结构](docs/rset_memory.md)
+  * [引用变更期间RSet的工作过程](docs/rset_modify_reference.md)
+  * [RSet的遍历](docs/rset_iterator.md)
+  * [Refine线程异步更新RSet](docs/rset_refine_thread.md)
 * Young GC
   * [YGC并行算法原理](docs/ygc_principle.md)
   * [YGC过程源码解析](docs/ygc_code_analysis.md)
