@@ -17,21 +17,23 @@
 * Remembered Set
   * [RSet原理与实例](docs/rset.md)
   * [Refine线程异步更新RSet](docs/refine_thread.md)
-* [Young GC](docs/ygc_principle.md)
-  * [YGC源码实现解析](docs/ygc_code_analysis.md)
+* Young GC
+  * [YGC并行算法原理]（docs/ygc_principle.md）
+  * [YGC过程源码解析](docs/ygc_code_analysis.md)
     * 1 扫描并复制Java根对象直接引用的年轻代对象
     * 2 扫描并复制老年代对象直接引用的年轻代对象
     * 3 深度遍历并复制1&2过程已处理的年轻代对象的所有子对象
-  * [一次YGC的内存变迁过程&各路线程执行过程](docs/ygc_memory_thread.md)
-* [Mixed GC](docs/mixed_gc_principle.md)
-  * 初始化标记
-    * [初始化标记源码实现解析](docs/mixed_gc_initial_mark_code_analysis.md)
-    * [一次初始化标记的内存变迁过程&各路线程执行过程](docs/mixed_gc_initial_mark_memory_thread.md)
+  * [YGC多程执行流程与内存架构变迁](docs/ygc_memory_thread.md)
+* Mixed GC
+  * [Mixed GC并行算法原理]（docs/mixed_gc_principle.md）
+  * 初始标记
+    * [初始标记过程源码解析](docs/mixed_gc_initial_mark_code_analysis.md)
+    * [初始标记多线程执行流程与内存架构变迁](docs/mixed_gc_initial_mark_memory_thread.md)
   * 并发标记
-    * [并发标记源码实现解析](docs/mixed_gc_concurrent_mark_code_analysis.md)
-    * [一次并发标记的内存变迁过程&各路线程执行过程](docs/mixed_gc_initial_mark_memory_thread.md)
+    * [并发标记过程源码解析](docs/mixed_gc_concurrent_mark_code_analysis.md)
+    * [并发标记多线程执行流程与内存架构变迁](docs/mixed_gc_concurrent_mark_memory_thread.md)
   * 再标记
-    * [再标记源码实现解析](docs/mixed_gc_remark_code_analysis.md)
-    * [一次再标记的内存变迁过程&各路线程执行过程](docs/mixed_gc_initial_mark_memory_thread.md)
+    * [再标记过程源码解析](docs/mixed_gc_remark_code_analysis.md)
+    * [再标记多线程执行流程与内存架构变迁](docs/mixed_gc_remark_memory_thread.md)
   * 垃圾回收
 * Full GC
