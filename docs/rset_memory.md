@@ -4,6 +4,8 @@
 
 [SparsePRT数据结构](#jump_3)
 
+[]
+
 
 ## <span id="jump_1">OtherRegionsTable数据结构</span>
 在hotspot源码中，RSet整体数据结构的定义为HeapRegionRemSet类，RSet的三级存储结构以及对RSet的操作都封装在HeapRegionRemSet的成员变量OtherRegionsTable类实例中：
@@ -143,7 +145,45 @@ SparsePRT* SparsePRT::get_from_expanded_list() {
 }
 ```
 
+将SparsePRT的存储量加大一倍：
+```c++
+void SparsePRT::expand() {
+  RSHashTable* last = _next;
+  _next = new RSHashTable(last->capacity() * 2);
 
+#if SPARSE_PRT_VERBOSE
+  gclog_or_tty->print_cr("  Expanded sparse table for %u to %d.",
+                         _hr->hrm_index(), _next->capacity());
+#endif
+  for (size_t i = 0; i < last->capacity(); i++) {
+    SparsePRTEntry* e = last->entry((int)i);
+    if (e->valid_entry()) {
+#if SPARSE_PRT_VERBOSE
+      gclog_or_tty->print_cr("    During expansion, transferred entry for %d.",
+                    e->r_ind());
+#endif
+      _next->add_entry(e);
+    }
+  }
+  if (last != _cur) {
+    delete last;
+  }
+  add_to_expanded_list(this);
+}
+```
 
+RSHashTable类主要的成员变量有：
+```c++
+class RSHashTable : public CHeapObj<mtGC> {
+  size_t _capacity;
+  size_t _capacity_mask;
+  size_t _occupied_entries;  // 存储的
+  size_t _occupied_cards;  // 存储的卡表索引号的数量
 
+  SparsePRTEntry* _entries;
+  int* _buckets;
+  int  _free_region;
+  int  _free_list;
+};
+```
 
