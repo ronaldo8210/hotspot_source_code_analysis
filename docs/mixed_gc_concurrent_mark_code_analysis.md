@@ -38,3 +38,65 @@ void ConcurrentMark::markFromRoots() {
   print_stats();
 }
 ```
+
+每个并发标记worker线程的工作入口为CMConcurrentMarkingTask::work()，主要代码如下：
+```c++
+class CMConcurrentMarkingTask: public AbstractGangTask {
+public:
+  void work(uint worker_id) {
+    // 执行CMConcurrentMarkingTask::work()的线程必须是GC工作线程，不能是其他类型线程
+    assert(Thread::current()->is_ConcurrentGC_thread(),
+           "this should only be done by a conc GC thread");
+    ResourceMark rm;
+
+    // 一个并发标记worker线程开始执行的时间戳
+    double start_vtime = os::elapsedVTime();
+
+    SuspendibleThreadSet::join();
+
+    // 并发标记worker线程的worker_id值必须在[0, 并发标记worker线程个数)之间
+    assert(worker_id < _cm->active_tasks(), "invariant");
+    // 从ConcurrentMark对象的CMTask数组中取一个CMTask对象，CMTask对象存储并发标记worker线程工作过程中的各类状态
+    CMTask* the_task = _cm->task(worker_id);
+    // 记录一个并发标记worker线程开始执行的时间戳
+    the_task->record_start_time();
+    if (!_cm->has_aborted()) {
+      do {
+        double start_vtime_sec = os::elapsedVTime();
+        double mark_step_duration_ms = G1ConcMarkStepDurationMillis;
+
+        the_task->do_marking_step(mark_step_duration_ms,
+                                  true  /* do_termination */,
+                                  false /* is_serial*/);
+
+        double end_vtime_sec = os::elapsedVTime();
+        double elapsed_vtime_sec = end_vtime_sec - start_vtime_sec;
+        _cm->clear_has_overflown();
+
+        _cm->do_yield_check(worker_id);
+
+        jlong sleep_time_ms;
+        if (!_cm->has_aborted() && the_task->has_aborted()) {
+          sleep_time_ms =
+            (jlong) (elapsed_vtime_sec * _cm->sleep_factor() * 1000.0);
+          SuspendibleThreadSet::leave();
+          os::sleep(Thread::current(), sleep_time_ms, false);
+          SuspendibleThreadSet::join();
+        }
+      } while (!_cm->has_aborted() && the_task->has_aborted());
+    }
+    the_task->record_end_time();
+    guarantee(!the_task->has_aborted() || _cm->has_aborted(), "invariant");
+
+    SuspendibleThreadSet::leave();
+
+    double end_vtime = os::elapsedVTime();
+    _cm->update_accum_task_vtime(worker_id, end_vtime - start_vtime);
+  }
+};
+```
+
+每个并发标记worker线程对各自处理的HeapRegion中存活的Java对象打标的具体过程在CMTask::do_marking_step()，主要代码如下：
+```c++
+
+```
