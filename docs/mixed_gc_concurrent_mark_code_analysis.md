@@ -531,3 +531,43 @@ void CMTask::do_marking_step(double time_target_ms,
 }
 ```
 
+update_region_limit()的实现代码如下：
+```c++
+void CMTask::update_region_limit() {
+  HeapRegion* hr            = _curr_region;
+  HeapWord* bottom          = hr->bottom();
+  HeapWord* limit           = hr->next_top_at_mark_start();
+
+  if (limit == bottom) {
+    if (_cm->verbose_low()) {
+      gclog_or_tty->print_cr("[%u] found an empty region "
+                             "["PTR_FORMAT", "PTR_FORMAT")",
+                             _worker_id, p2i(bottom), p2i(limit));
+    }
+    // The region was collected underneath our feet.
+    // We set the finger to bottom to ensure that the bitmap
+    // iteration that will follow this will not do anything.
+    // (this is not a condition that holds when we set the region up,
+    // as the region is not supposed to be empty in the first place)
+    _finger = bottom;
+  } else if (limit >= _region_limit) {
+    assert(limit >= _finger, "peace of mind");
+  } else {
+    assert(limit < _region_limit, "only way to get here");
+    // This can happen under some pretty unusual circumstances.  An
+    // evacuation pause empties the region underneath our feet (NTAMS
+    // at bottom). We then do some allocation in the region (NTAMS
+    // stays at bottom), followed by the region being used as a GC
+    // alloc region (NTAMS will move to top() and the objects
+    // originally below it will be grayed). All objects now marked in
+    // the region are explicitly grayed, if below the global finger,
+    // and we do not need in fact to scan anything else. So, we simply
+    // set _finger to be limit to ensure that the bitmap iteration
+    // doesn't do anything.
+    _finger = limit;
+  }
+
+  _region_limit = limit;
+}
+```
+
