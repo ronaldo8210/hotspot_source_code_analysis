@@ -124,27 +124,22 @@ void CMTask::do_marking_step(double time_target_ms,
   assert(!_claimed,
          "only one thread should claim this task at any one time");
 
-  // OK, this doesn't safeguard again all possible scenarios, as it is
-  // possible for two threads to set the _claimed flag at the same
-  // time. But it is only for debugging purposes anyway and it will
-  // catch most problems.
+  // 标记已有GC线程占用CMTask对象
   _claimed = true;
 
   _start_time_ms = os::elapsedVTime() * 1000.0;
   statsOnly( _interval_start_time_ms = _start_time_ms );
 
-  // If do_stealing is true then do_marking_step will attempt to
-  // steal work from the other CMTasks. It only makes sense to
-  // enable stealing when the termination protocol is enabled
-  // and do_marking_step() is not being called serially.
+  // 判断是否需要work steal，work steal指一个并发标记worker线程处理完分配给它的Region内的Java对象打标工作后，
+  // 继续去抢其他worker线程的工作，去处理原本分配给其他worker线程的Region内的Java对象打标工作，
+  // 从总体上尽可能的缩短全局标记工作的执行时间
   bool do_stealing = do_termination && !is_serial;
 
   double diff_prediction_ms =
     g1_policy->get_new_prediction(&_marking_step_diffs_ms);
   _time_target_ms = time_target_ms - diff_prediction_ms;
 
-  // set up the variables that are used in the work-based scheme to
-  // call the regular clock method
+  // 标记的字节数、处理的引用数清零，一旦标记的字节数或处理的引用数超过预定值，do_marking_step()会return
   _words_scanned = 0;
   _refs_reached  = 0;
   recalculate_limits();
