@@ -214,32 +214,26 @@ void CMTask::do_marking_step(double time_target_ms,
         regular_clock_call();
       } else if (_nextMarkBitMap->iterate(&bitmap_closure, mr)) {
         // 主要关注这里，遍历_nextMarkBitMap位图的mr标识范围的区域，对每个置1的bit回调bitmap_closure对象的do_bit()函数
-        // 如果iterate返回值==0，则mr标识范围内的置1的bit全部处理完，即相应的灰标对象都完成了引用的遍历，它们直接引用的Java对象的地址都被放入_task_queue队列
-        // 如果iterate返回值
+        // 如果iterate返回值==true，则mr标识范围内的置1的bit全部处理完，即相应的灰标对象都完成了引用的遍历，它们直接引用的Java对象的地址都被放入_task_queue队列
+        // 如果iterate返回值==false，说明CMTask对象已被设置为aborted状态，需要重新进入do_marking_step()去处理SATB队列
+        
+        // 当前的Region已处理完，清空相关指针
         giveup_current_region();
+        // 即使当前Region全部处理完且没有abort，还是要检查下各类abort触发条件，判断是否需要abort
         regular_clock_call();
       } else {
+        // 遍历_nextMarkBitMap位图过程中发生abort，走到这里
         assert(has_aborted(), "currently the only way to do so");
-        // The only way to abort the bitmap iteration is to return
-        // false from the do_bit() method. However, inside the
-        // do_bit() method we move the _finger to point to the
-        // object currently being looked at. So, if we bail out, we
-        // have definitely set _finger to something non-null.
         assert(_finger != NULL, "invariant");
 
-        // Region iteration was actually aborted. So now _finger
-        // points to the address of the object we last scanned. If we
-        // leave it there, when we restart this task, we will rescan
-        // the object. It is easy to avoid this. We move the finger by
-        // enough to point to the next possible object header (the
-        // bitmap knows by how much we need to move it as it knows its
-        // granularity).
         assert(_finger < _region_limit, "invariant");
+        // 计算Region中下次将被处理的灰标Java对象的地址
         HeapWord* new_finger = _nextMarkBitMap->nextObject(_finger);
         // Check if bitmap iteration was aborted while scanning the last object
         if (new_finger >= _region_limit) {
           giveup_current_region();
         } else {
+          // 更新_finger指向Region中下次将被处理的灰标Java对象
           move_finger_to(new_finger);
         }
       }
@@ -247,28 +241,21 @@ void CMTask::do_marking_step(double time_target_ms,
     // At this point we have either completed iterating over the
     // region we were holding on to, or we have aborted.
 
-    // We then partially drain the local queue and the global stack.
-    // (Do we really need this?)
+    // 处理一部分_task_queue队列中的对象（是否有必要？）
     drain_local_queue(true);
     drain_global_stack(true);
 
-    // Read the note on the claim_region() method on why it might
-    // return NULL with potentially more regions available for
-    // claiming and why we have to check out_of_regions() to determine
-    // whether we're done or not.
     while (!has_aborted() && _curr_region == NULL && !_cm->out_of_regions()) {
-      // We are going to try to claim a new region. We should have
-      // given up on the previous one.
-      // Separated the asserts so that we know which one fires.
+      // 只有上一个Region成功处理完成才会走到这里
       assert(_curr_region  == NULL, "invariant");
       assert(_finger       == NULL, "invariant");
       assert(_region_limit == NULL, "invariant");
       if (_cm->verbose_low()) {
         gclog_or_tty->print_cr("[%u] trying to claim a new region", _worker_id);
       }
+      // 给当前标记线程分配一个新的待处理的Region
       HeapRegion* claimed_region = _cm->claim_region(_worker_id);
       if (claimed_region != NULL) {
-        // Yes, we managed to claim one
         statsOnly( ++_regions_claimed );
 
         if (_cm->verbose_low()) {
@@ -280,11 +267,6 @@ void CMTask::do_marking_step(double time_target_ms,
         setup_for_region(claimed_region);
         assert(_curr_region == claimed_region, "invariant");
       }
-      // It is important to call the regular clock here. It might take
-      // a while to claim a region if, for example, we hit a large
-      // block of empty regions. So we need to call the regular clock
-      // method once round the loop to make sure it's called
-      // frequently enough.
       regular_clock_call();
     }
 
@@ -292,11 +274,11 @@ void CMTask::do_marking_step(double time_target_ms,
       assert(_cm->out_of_regions(),
              "at this point we should be out of regions");
     }
-  } while ( _curr_region != NULL && !has_aborted());
+  } while ( _curr_region != NULL && !has_aborted());  // 在下一个while循环中处理新分配的Region
 
+  // 走到这里，说明已没有剩余的可被处理的Region能够分配给该标记线程了
+  
   if (!has_aborted()) {
-    // We cannot check whether the global stack is empty, since other
-    // tasks might be pushing objects to it concurrently.
     assert(_cm->out_of_regions(),
            "at this point we should be out of regions");
 
@@ -304,8 +286,6 @@ void CMTask::do_marking_step(double time_target_ms,
       gclog_or_tty->print_cr("[%u] all regions claimed", _worker_id);
     }
 
-    // Try to reduce the number of available SATB buffers so that
-    // remark has less work to do.
     drain_satb_buffers();
   }
 
