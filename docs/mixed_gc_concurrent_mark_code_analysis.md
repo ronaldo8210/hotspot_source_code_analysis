@@ -69,7 +69,7 @@ public:
 
         // 在do_marking_step()中执行打标操作、处理SATB队列
         // 1、在do_marking_step()开始阶段先判断SATB队列内是否已存有自身引用发生变更的Java对象，若是则先处理一部分SATB队列中的Java对象，
-             将这些Java对象判定为灰色对象，对其引用的所有对象进行深度遍历打标。这部分灰标Java对象的深度遍历全部完成后再去对分配给该并发标记worker线程的Region中的Java对象打标；
+        //   将这些Java对象判定为灰色对象，对其引用的所有对象进行深度遍历打标。这部分灰标Java对象的深度遍历全部完成后再去对分配给该并发标记worker线程的Region中的Java对象打标；
         // 2、如果SATB队列为空，则直接开始对分配给该并发标记worker线程的Region中的Java对象打标
         // 3、在对Region中的Java对象打标的过程中，如果耗时时间超过mark_step_duration_ms，或者发现SATB中新加入的引用发生变更的Java对象累积到了一定数量，
         //   则在CMTask对象中将工作状态设置为abort，并从do_marking_step()调用中return，
@@ -142,6 +142,7 @@ void CMTask::do_marking_step(double time_target_ms,
   // 标记的字节数、处理的引用数清零，一旦标记的字节数或处理的引用数超过预定值，do_marking_step()会return
   _words_scanned = 0;
   _refs_reached  = 0;
+  // 重新计算本轮标记需要处理的Region内的对象范围
   recalculate_limits();
 
   // clear all flags
@@ -157,48 +158,34 @@ void CMTask::do_marking_step(double time_target_ms,
                            _worker_id, _calls, _time_target_ms);
   }
 
-  // Set up the bitmap and oop closures. Anything that uses them is
-  // eventually called from this method, so it is OK to allocate these
-  // statically.
+  // 下面两个对象都是分配在线程栈上的，一轮标记结束后就销毁，下一轮标记过程再创建
+  // bitmap_closure对象负责处理_nextMarkBitMap位图上的被设置为1的bit，也就是处理bit映射到的灰色对象
   CMBitMapClosure bitmap_closure(this, _cm, _nextMarkBitMap);
+  // cm_oop_closure对象
   G1CMOopClosure  cm_oop_closure(_g1h, _cm, this);
   set_cm_oop_closure(&cm_oop_closure);
 
   if (_cm->has_overflown()) {
-    // This can happen if the mark stack overflows during a GC pause
-    // and this task, after a yield point, restarts. We have to abort
-    // as we need to get into the overflow protocol which happens
-    // right at the end of this task.
     set_has_aborted();
   }
 
-  // First drain any available SATB buffers. After this, we will not
-  // look at SATB buffers before the next invocation of this method.
-  // If enough completed SATB buffers are queued up, the regular clock
-  // will abort this task so that it restarts.
+  // 为了尽量维持并发标记开始时刻的整体内存的快照，优先处理SATB队列中的引用发生变化的Java对象，重新对这些Java对象执行深度遍历打标
+  // 将SATB中的Java对象全部处理完再往下执行
   drain_satb_buffers();
-  // ...then partially drain the local queue and the global stack
+  // 处理_task_queue中的一部分数据，在打标过程中，当前正在处理的灰标Java对象，其直接引用的对象也会被当作灰标对象，放入_task_queue中
+  // 后续再从_task_queue中pop出灰标对象，遍历其引用的对象
   drain_local_queue(true);
   drain_global_stack(true);
 
   do {
     if (!has_aborted() && _curr_region != NULL) {
-      // This means that we're already holding on to a region.
+      // _finger指向_curr_region内本轮标记开始的起点
       assert(_finger != NULL, "if region is not NULL, then the finger "
              "should not be NULL either");
 
-      // We might have restarted this task after an evacuation pause
-      // which might have evacuated the region we're holding on to
-      // underneath our feet. Let's read its limit again to make sure
-      // that we do not iterate over a region of the heap that
-      // contains garbage (update_region_limit() will also move
-      // _finger to the start of the region if it is found empty).
+      // 更新本轮标记的最大范围，之前可能由于标记过程被abort，重新进入do_marking_step()，因为标记线程和Java业务线程同时执行，
+      // Region内可能已分配了新的Java对象，所以要重新计算本轮标记的处理范围
       update_region_limit();
-      // We will start from _finger not from the start of the region,
-      // as we might be restarting this task after aborting half-way
-      // through scanning this region. In this case, _finger points to
-      // the address where we last found a marked object. If this is a
-      // fresh region, _finger points to start().
       MemRegion mr = MemRegion(_finger, _region_limit);
 
       if (_cm->verbose_low()) {
@@ -212,14 +199,6 @@ void CMTask::do_marking_step(double time_target_ms,
       assert(!_curr_region->isHumongous() || mr.start() == _curr_region->bottom(),
              "humongous regions should go around loop once only");
 
-      // Some special cases:
-      // If the memory region is empty, we can just give up the region.
-      // If the current region is humongous then we only need to check
-      // the bitmap for the bit associated with the start of the object,
-      // scan the object if it's live, and give up the region.
-      // Otherwise, let's iterate over the bitmap of the part of the region
-      // that is left.
-      // If the iteration is successful, give up the region.
       if (mr.is_empty()) {
         giveup_current_region();
         regular_clock_call();
@@ -234,6 +213,9 @@ void CMTask::do_marking_step(double time_target_ms,
         giveup_current_region();
         regular_clock_call();
       } else if (_nextMarkBitMap->iterate(&bitmap_closure, mr)) {
+        // 主要关注这里，遍历_nextMarkBitMap位图的mr标识范围的区域，对每个置1的bit回调bitmap_closure对象的do_bit()函数
+        // 如果iterate返回值==0，则mr标识范围内的置1的bit全部处理完，即相应的灰标对象都完成了引用的遍历，它们直接引用的Java对象的地址都被放入_task_queue队列
+        // 如果iterate返回值
         giveup_current_region();
         regular_clock_call();
       } else {
