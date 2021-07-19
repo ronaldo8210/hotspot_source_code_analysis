@@ -22,7 +22,7 @@
   * [Refine线程异步更新RSet](docs/rset_refine_thread.md)
 * Young GC
   * [YGC并行算法原理](docs/ygc_principle.md)
-  * [YGC过程源码解析](docs/ygc_code_analysis.md)
+  * [YGC过程源码解析]
     * [1 扫描并复制Java根对象直接引用的年轻代对象](docs/ygc_code_analysis_1.md)
     * [2 扫描并复制老年代对象直接引用的年轻代对象](docs/ygc_code_analysis_2.md)
     * [3 深度遍历并复制1 & 2过程已处理的年轻代对象的所有引用对象](docs/ygc_code_analysis_3.md)
