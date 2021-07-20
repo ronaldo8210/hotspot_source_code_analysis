@@ -2,7 +2,7 @@ YGC期间，Java根对象直接引用的年轻代对象全部处理完后（这�
 
 一个YGC worker线程处理老年代直接引用的年轻代对象的函数调用链为：
 
-- G1RootProcessor::scan_remembered_sets() --> G1RemSet::oops_into_collection_set_do() --> G1RemSet::scanRS() --> G1CollectedHeap::collection_set_iterate_from() --> ScanRSClosure::doHeapRegion() --> ScanRSClosure::scanCard() --> 
+- G1RootProcessor::scan_remembered_sets() --> G1RemSet::oops_into_collection_set_do() --> G1RemSet::scanRS() --> G1CollectedHeap::collection_set_iterate_from() --> ScanRSClosure::doHeapRegion() --> ScanRSClosure::scanCard() --> HeapRegionDCTOC::walk_mem_region() --> G1ParPushHeapRSClosure::do_oop_nv()
 
 各个函数主要代码的解析如下：
 
@@ -96,108 +96,59 @@ void G1CollectedHeap::collection_set_iterate_from(HeapRegion* r,
 ScanRSClosure::doHeapRegion() & ScanRSClosure::scanCard()
 ```c++
 class ScanRSClosure : public HeapRegionClosure {
-  size_t _cards_done, _cards;
-  G1CollectedHeap* _g1h;
-
-  G1ParPushHeapRSClosure* _oc;
-  CodeBlobClosure* _code_root_cl;
-
-  G1BlockOffsetSharedArray* _bot_shared;
-  G1SATBCardTableModRefBS *_ct_bs;
-
-  double _strong_code_root_scan_time_sec;
-  uint   _worker_i;
-  int    _block_size;
-  bool   _try_claimed;
 
 public:
-  ScanRSClosure(G1ParPushHeapRSClosure* oc,
-                CodeBlobClosure* code_root_cl,
-                uint worker_i) :
-    _oc(oc),
-    _code_root_cl(code_root_cl),
-    _strong_code_root_scan_time_sec(0.0),
-    _cards(0),
-    _cards_done(0),
-    _worker_i(worker_i),
-    _try_claimed(false)
-  {
-    _g1h = G1CollectedHeap::heap();
-    _bot_shared = _g1h->bot_shared();
-    _ct_bs = _g1h->g1_barrier_set();
-    _block_size = MAX2<int>(G1RSetScanBlockSize, 1);
-  }
-
-  void set_try_claimed() { _try_claimed = true; }
 
   void scanCard(size_t index, HeapRegion *r) {
-    // Stack allocate the DirtyCardToOopClosure instance
     HeapRegionDCTOC cl(_g1h, r, _oc,
                        CardTableModRefBS::Precise);
 
     // Set the "from" region in the closure.
     _oc->set_region(r);
+    // _bot_shared->address_for_index(index)得到的是card的内存起始地址
+    // G1BlockOffsetSharedArray::N_words指一个card占据的内存字节数
+    // card_region指card的内存地址范围
     MemRegion card_region(_bot_shared->address_for_index(index), G1BlockOffsetSharedArray::N_words);
+    // r->bottom()是card所属Region的内存区的底部地址
+    // r->scan_top()是card所属Region的内存区的已分配对象的顶部地址
     MemRegion pre_gc_allocated(r->bottom(), r->scan_top());
+    // 防止计算出的card_region内存越界
     MemRegion mr = pre_gc_allocated.intersection(card_region);
     if (!mr.is_empty() && !_ct_bs->is_card_claimed(index)) {
-      // We make the card as "claimed" lazily (so races are possible
-      // but they're benign), which reduces the number of duplicate
-      // scans (the rsets of the regions in the cset can intersect).
       _ct_bs->set_card_claimed(index);
       _cards_done++;
+      // 遍历card中的所有对象
       cl.do_MemRegion(mr);
     }
   }
 
-  void printCard(HeapRegion* card_region, size_t card_index,
-                 HeapWord* card_start) {
-    gclog_or_tty->print_cr("T " UINT32_FORMAT " Region [" PTR_FORMAT ", " PTR_FORMAT ") "
-                           "RS names card %p: "
-                           "[" PTR_FORMAT ", " PTR_FORMAT ")",
-                           _worker_i,
-                           card_region->bottom(), card_region->end(),
-                           card_index,
-                           card_start, card_start + G1BlockOffsetSharedArray::N_words);
-  }
-
-  void scan_strong_code_roots(HeapRegion* r) {
-    double scan_start = os::elapsedTime();
-    r->strong_code_roots_do(_code_root_cl);
-    _strong_code_root_scan_time_sec += (os::elapsedTime() - scan_start);
-  }
-
   bool doHeapRegion(HeapRegion* r) {
     assert(r->in_collection_set(), "should only be called on elements of CS.");
+    // hrrs指向待回收的年轻代的Remembered Set对象
     HeapRegionRemSet* hrrs = r->rem_set();
     if (hrrs->iter_is_complete()) return false; // All done.
     if (!_try_claimed && !hrrs->claim_iter()) return false;
-    // If we ever free the collection set concurrently, we should also
-    // clear the card table concurrently therefore we won't need to
-    // add regions of the collection set to the dirty cards region.
+    
+    // 暂不理解为什么需要将年轻代HeapRegion加入到全局的_dirty_cards_region_list队列
     _g1h->push_dirty_cards_region(r);
-    // If we didn't return above, then
-    //   _try_claimed || r->claim_iter()
-    // is true: either we're supposed to work on claimed-but-not-complete
-    // regions, or we successfully claimed the region.
 
     HeapRegionRemSetIterator iter(hrrs);
+    // card_index是指Remembered Set中记录的老年代card在全局卡表中的索引号
     size_t card_index;
 
-    // We claim cards in block so as to recude the contention. The block size is determined by
-    // the G1RSetScanBlockSize parameter.
     size_t jump_to_card = hrrs->iter_claimed_next(_block_size);
     for (size_t current_card = 0; iter.has_next(card_index); current_card++) {
+      // 在循环中不断调用iter.has_next(card_index)，完成Remembered Set的遍历
+      // 每一次has_next()返回时，card_index都存储着遍历到的新的老年代card在全局卡表中的索引号
+      
       if (current_card >= jump_to_card + _block_size) {
         jump_to_card = hrrs->iter_claimed_next(_block_size);
       }
       if (current_card < jump_to_card) continue;
+      // 取得老年代card的内存起始地址
       HeapWord* card_start = _g1h->bot_shared()->address_for_index(card_index);
-#if 0
-      gclog_or_tty->print("Rem set iteration yielded card [" PTR_FORMAT ", " PTR_FORMAT ").\n",
-                          card_start, card_start + CardTableModRefBS::card_size_in_words);
-#endif
 
+      // 取得老年代card所属Region内存区域对应的HeapRegion对象
       HeapRegion* card_region = _g1h->heap_region_containing(card_start);
       _cards++;
 
@@ -206,8 +157,10 @@ public:
       }
 
       // If the card is dirty, then we will scan it during updateRS.
+      // card_region肯定不能是待回收的代际空间
       if (!card_region->in_collection_set() &&
           !_ct_bs->is_card_dirty(card_index)) {
+        // 扫描card中的老年代对象  
         scanCard(card_index, card_region);
       }
     }
@@ -219,14 +172,74 @@ public:
     }
     return false;
   }
-
-  double strong_code_root_scan_time_sec() {
-    return _strong_code_root_scan_time_sec;
-  }
-
-  size_t cards_done() { return _cards_done;}
-  size_t cards_looked_up() { return _cards;}
 };
 ```
 
+HeapRegionDCTOC::walk_mem_region()
+```c++
+void HeapRegionDCTOC::walk_mem_region(MemRegion mr,
+                                      HeapWord* bottom,
+                                      HeapWord* top) {
+  // 遍历card中的所有对象，对每个对象的引用属性调用G1ParPushHeapRSClosure回调对象
+  
+  G1CollectedHeap* g1h = _g1;
+  size_t oop_size;
+  HeapWord* cur = bottom;
 
+  // Start filtering what we add to the remembered set. If the object is
+  // not considered dead, either because it is marked (in the mark bitmap)
+  // or it was allocated after marking finished, then we add it. Otherwise
+  // we can safely ignore the object.
+  if (!g1h->is_obj_dead(oop(cur), _hr)) {
+    oop_size = oop(cur)->oop_iterate(_rs_scan, mr);
+  } else {
+    oop_size = _hr->block_size(cur);
+  }
+
+  cur += oop_size;
+
+  if (cur < top) {
+    oop cur_oop = oop(cur);
+    oop_size = _hr->block_size(cur);
+    HeapWord* next_obj = cur + oop_size;
+    while (next_obj < top) {
+      // Keep filtering the remembered set.
+      if (!g1h->is_obj_dead(cur_oop, _hr)) {
+        // Bottom lies entirely below top, so we can call the
+        // non-memRegion version of oop_iterate below.
+        cur_oop->oop_iterate(_rs_scan);
+      }
+      cur = next_obj;
+      cur_oop = oop(cur);
+      oop_size = _hr->block_size(cur);
+      next_obj = cur + oop_size;
+    }
+
+    // Last object. Need to do dead-obj filtering here too.
+    if (!g1h->is_obj_dead(oop(cur), _hr)) {
+      oop(cur)->oop_iterate(_rs_scan, mr);
+    }
+  }
+}
+```
+
+G1ParPushHeapRSClosure::do_oop_nv()
+```c++
+template <class T>
+inline void G1ParPushHeapRSClosure::do_oop_nv(T* p) {
+  T heap_oop = oopDesc::load_heap_oop(p);
+
+  if (!oopDesc::is_null(heap_oop)) {
+    oop obj = oopDesc::decode_heap_oop_not_null(heap_oop);
+    if (_g1->is_in_cset_or_humongous(obj)) {
+      Prefetch::write(obj->mark_addr(), 0);
+      Prefetch::read(obj->mark_addr(), (HeapWordSize*2));
+
+      // 将引用放入RefToScanQueue队列，用于后续的对象深度遍历
+      _par_scan_state->push_on_queue(p);
+    } else {
+      assert(!_g1->obj_in_cs(obj), "checking");
+    }
+  }
+}
+```
