@@ -24,6 +24,6 @@ Remembered Set与卡表相关，卡表（card table）的概念为，在G1中，
 
 老年代对象obj_17引用老年代对象obj_11
 
-<img src="../images/rset_1.png" width="100%" height="100%"/>
+<img src="../images/rset_purpose.png" width="100%" height="100%"/>
 
 根据上述Remembered Set记录引用的规则，在年轻代1的Remembered Set中记录card 5和card 6的卡表索引，在年轻代2的Remembered Set中记录card 8的卡表索引，在老年代1的Remembered Set中记录card 8的卡表索引。从obj_1、obj_6、obj_9出发的引用均不需要记录。
