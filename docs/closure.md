@@ -1,9 +1,0 @@
-YGC过程用到
-
-InterpreterFrameClosure 对一个java线程栈的一个frame里的一个引用变量调用_f->do_oop
-
-BufferingOopClosure
-
-G1ParScanClosure 当一个存活的对象刚完成复制时，扫描该对象的每一个引用属性，对每一个引用属性调用该回调对象
-
-G1ParEvacuateFollowersClosure
