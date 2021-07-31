@@ -8,7 +8,7 @@
 
 - obj_1引用obj_6，obj_2引用obj_7，obj_5引用obj_10和obj_12，obj_6引用obj_9和obj_11，obj_7引用obj_13，obj_10引用obj_8和obj_115
 
-1. 初始标记阶段，年轻代中所有对象都标记为灰色对象，在_nextMarkBitMap中将各个年轻代灰色对象映射到的bit置为1，然后开始并发标记过程，设VMThread启动了2个并发标记worker线程，并且此时系统中有3个Java业务线程。CMTask1记录并发标记worker线程1的工作状态，CMTask2记录并发标记worker线程2的工作状态：
+1 初始标记阶段，年轻代中所有对象都标记为灰色对象，在_nextMarkBitMap中将各个年轻代灰色对象映射到的bit置为1，然后开始并发标记过程，设VMThread启动了2个并发标记worker线程，并且此时系统中有3个Java业务线程。CMTask1记录并发标记worker线程1的工作状态，CMTask2记录并发标记worker线程2的工作状态：
 
 - CMTask1结构中_words_scanned和_refs_reached都是0，_curr_region指向年轻代1，_finger指向obj_1的起始地址，_region_limit指向obj_3的结束地址；
 
@@ -18,7 +18,7 @@
 
 <img src="../images/mixed_gc_memory_thread_1.png" width="100%" height="100%"/>
 
-2. 2个并发标记worker线程分别开始各自的打标工作，worker 1从obj_1出发遍历到obj_1的引用对象obj_6，将obj_6视作灰色对象，在_nextMarkBitMap中将obj_6对应的bit置1，并将obj_6的地址加入CMTaskQueue队列，obj_1的所有引用属性已全部遍历完，obj_1已经是黑色对象；worker 2处理对象obj_4，obj_4并未引用其他对象，直接视作黑色对象，worker 2将根据_nextMarkBitMap中下一个置1的bit去处理obj_5。
+二. 2个并发标记worker线程分别开始各自的打标工作，worker 1从obj_1出发遍历到obj_1的引用对象obj_6，将obj_6视作灰色对象，在_nextMarkBitMap中将obj_6对应的bit置1，并将obj_6的地址加入CMTaskQueue队列，obj_1的所有引用属性已全部遍历完，obj_1已经是黑色对象；worker 2处理对象obj_4，obj_4并未引用其他对象，直接视作黑色对象，worker 2将根据_nextMarkBitMap中下一个置1的bit去处理obj_5。
 
 此时的整体内存布局如下图所示：
 
