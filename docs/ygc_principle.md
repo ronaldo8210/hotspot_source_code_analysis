@@ -38,3 +38,6 @@ to_obj  拷贝后的数组对象，并不是原数组对象的全部，是一部
 
 YGC过程中每个并发线程如何指定各自处理的CSet ？
 
+<img src="../images/ygc_phase_1.png" width="100%" height="100%"/>
+
+<img src="../images/ygc_phase_2.png" width="100%" height="100%"/>
