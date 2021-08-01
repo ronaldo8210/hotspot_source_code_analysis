@@ -206,10 +206,10 @@ private:
 };
 ```
 
+<img src="../images/rset_sparsePRT.png" width="100%" height="100%"/>
+
 ## <span id="jump_4">PerRegionTable数据结构</span>
 当SparsePRT结构中记录的Card数量超过阈值时，降级为使用PerRegionTable结构，在PerRegionTable中不会记录每一个Card的编号，而是使用位图bitmap来记录Card，以节省内存使用量。
-
-<img src="../images/rset_perRegionTable.png" width="100%" height="100%"/>
 
 PerRegionTable类主要的成员变量、成员函数的源码解析：
 ```c++
@@ -305,6 +305,8 @@ public:
   
 };
 ```
+
+<img src="../images/rset_perRegionTable.png" width="100%" height="100%"/>
 
 ## <span id="jump_5">粗粒度BitMap</span>
 当PerRegionTable中记录的Card数量超过阈值时，再次降级，不再记录Card，而是只用一个bitmap记录引用者对象所在的Region。
