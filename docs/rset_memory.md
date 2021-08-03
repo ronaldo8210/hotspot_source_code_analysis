@@ -19,11 +19,11 @@ private:
 
 在OtherRegionsTable类中，定义了Remembered Set的三级粒度存储结构，分别为：
 
-- SparsePRT：
+- SparsePRT
 
-- PerRegionTable：
+- PerRegionTable
 
-- BitMap：
+- Coarse BitMap
 
 OtherRegionsTable类的主要成员变量有：
 ```c++
