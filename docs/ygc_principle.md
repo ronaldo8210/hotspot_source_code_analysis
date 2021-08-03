@@ -31,9 +31,14 @@
 - JVM运行了3个Java业务线程，线程栈1中的引用变量ref_1引用年轻代对象obj_1，线程栈2中的引用变量ref_4引用年轻代对象obj_11，线程栈3中的引用变量ref_5引用老年代对象obj_12
 
 上述内存布局如下图所示：
+<br/>
+<br/>
 
 <img src="../images/ygc_phase_1.png" width="100%" height="100%"/>
 
+<br/>
+<br/>
+<br/>
 根据YGC的规则，完成YGC后，内存布局如下图所示：
 
 <img src="../images/ygc_phase_2.png" width="100%" height="100%"/>
