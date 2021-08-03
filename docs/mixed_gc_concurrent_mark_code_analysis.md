@@ -2,8 +2,7 @@
 
 1. VMThread线程创建标记Task对象，启动多个并发标记worker线程去执行Task对象的work()方法，并将自身挂起，等待所有并发标记worker线程完成任务；
 
-2. 每个并发标记worker线程，
-
+2. 每个并发标记worker线程在进行深度遍历对象打标过程中，可以被中断，比如SATB队列中存在需要处理的数据，此时必须先去处理SATB队列，再继续原先的打标过程。
 
 VMThread线程启动多个并发标记worker线程的主要代码如下：
 ```c++
@@ -345,6 +344,7 @@ void CMTask::update_region_limit() {
   HeapRegion* hr            = _curr_region;
   // bottom指针指向Region的尾部
   HeapWord* bottom          = hr->bottom();
+  // limit是本轮标记开始时，HeapRegion中已分配的对象占据空间的最大位置
   HeapWord* limit           = hr->next_top_at_mark_start();
 
   if (limit == bottom) {
@@ -353,29 +353,16 @@ void CMTask::update_region_limit() {
                              "["PTR_FORMAT", "PTR_FORMAT")",
                              _worker_id, p2i(bottom), p2i(limit));
     }
-    // The region was collected underneath our feet.
-    // We set the finger to bottom to ensure that the bitmap
-    // iteration that will follow this will not do anything.
-    // (this is not a condition that holds when we set the region up,
-    // as the region is not supposed to be empty in the first place)
     _finger = bottom;
   } else if (limit >= _region_limit) {
+    // 正常应该走这里，因为并发标记线程和Java线程是同时运行的，Java线程也在不停分配新对象，所以limit指针值肯定是大于_region_limit指针值的
     assert(limit >= _finger, "peace of mind");
   } else {
     assert(limit < _region_limit, "only way to get here");
-    // This can happen under some pretty unusual circumstances.  An
-    // evacuation pause empties the region underneath our feet (NTAMS
-    // at bottom). We then do some allocation in the region (NTAMS
-    // stays at bottom), followed by the region being used as a GC
-    // alloc region (NTAMS will move to top() and the objects
-    // originally below it will be grayed). All objects now marked in
-    // the region are explicitly grayed, if below the global finger,
-    // and we do not need in fact to scan anything else. So, we simply
-    // set _finger to be limit to ensure that the bitmap iteration
-    // doesn't do anything.
     _finger = limit;
   }
 
+  // 更新_region_limit
   _region_limit = limit;
 }
 ```
@@ -385,6 +372,7 @@ void CMTask::update_region_limit() {
 class CMBitMapClosure : public BitMapClosure {
 public:
   bool do_bit(size_t offset) {
+    // 根据位图上的bit得到映射到的对象的内存地址
     HeapWord* addr = _nextMarkBitMap->offsetToHeapWord(offset);
     assert(_nextMarkBitMap->isMarked(addr), "invariant");
     assert( addr < _cm->finger(), "invariant");
@@ -392,9 +380,10 @@ public:
     statsOnly( _task->increase_objs_found_on_bitmap() );
     assert(addr >= _task->finger(), "invariant");
 
-    // We move that task's local finger along.
+    // 更新finger指针，向前位移
     _task->move_finger_to(addr);
 
+    // 在scan_object()中，会遍历对象的所有引用属性
     _task->scan_object(oop(addr));
     // we only partially drain the local queue and global stack
     _task->drain_local_queue(true);
@@ -406,4 +395,3 @@ public:
   }
 };
 ```
-
