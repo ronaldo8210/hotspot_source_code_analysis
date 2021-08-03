@@ -11,8 +11,9 @@
   * [RSet内存结构](docs/rset_memory.md)
   * [引用变更期间RSet的工作过程](docs/rset_modify_reference.md)
   * [RSet的遍历](docs/rset_iterator.md)
-  * [Refine线程异步更新RSet](docs/rset_refine_thread.md)
+  * Refine线程异步更新RSet
 * BarrierSet
+* WorkGroup多线程工作框架
 * VMThread线程
 * 安全点Safepoint
 * Young GC
